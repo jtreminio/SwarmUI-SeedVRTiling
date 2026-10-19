@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <AssemblyName>SwarmUI-SeedVRTiling</AssemblyName>
+    <TargetFramework>net8.0</TargetFramework>
+    <SwarmSource Condition="'$(SwarmSource)' == ''">../..</SwarmSource>
+    <SwarmAssemblyPath Condition="'$(SwarmAssemblyPath)' == ''">$(SwarmSource)/bin/live_release/SwarmUI.dll</SwarmAssemblyPath>
+  </PropertyGroup>
+  <Import Project="$(SwarmSource)/SwarmUI.extension.props" />
+  <ItemGroup Condition="'$(SwarmSource)' != '../..'">
+    <Compile Remove="../../GlobalSuppressions.cs;../../GlobalUsings.cs" />
+    <Compile Include="$(SwarmSource)/GlobalSuppressions.cs;$(SwarmSource)/GlobalUsings.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Remove="SwarmUI" />
+    <Reference Include="SwarmUI"><HintPath>$(SwarmAssemblyPath)</HintPath><Private>false</Private></Reference>
+    <Reference Include="ComfyTyped"><HintPath>lib/ComfyTyped.dll</HintPath></Reference>
+    <InternalsVisibleTo Include="SwarmUI-SeedVRTiling.Tests" />
+    <Compile Remove="Tests/**/*.cs;bin/**/*.cs;obj/**/*.cs;**/._*" />
+  </ItemGroup>
+</Project>

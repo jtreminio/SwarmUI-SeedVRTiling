@@ -1,32 +1,27 @@
+using SeedVRTiling.Generated;
 using System.IO;
-using ComfyTyped.Core;
 using SwarmUI.Builtin_ComfyUIBackend;
 using SwarmUI.Core;
 using SwarmUI.Text2Image;
 
 namespace SeedVRTiling;
 
-/// <summary>Adds spatial image tiling to SwarmUI's native SeedVR restoration stage.</summary>
 public sealed class SeedVRTilingExtension : Extension
 {
     public static T2IRegisteredParam<bool> Enabled;
     public static T2IRegisteredParam<int> TileSize, TileOverlap;
     public static T2IRegisteredParam<double> AntiAliasing;
     public static T2IRegisteredParam<string> Blending, MegaDimensionsFallback;
-    private static bool hookInstalled;
 
     public override void OnPreInit()
     {
         ScriptFiles.Add("Assets/seedvr-tiling.js");
-        ComfyUIBackendExtension.NodeToFeatureMap[TileSplitNode.ClassType] = TileSplitNode.ClassType;
-        ComfyUIBackendExtension.NodeToFeatureMap[TileMergeNode.ClassType] = TileMergeNode.ClassType;
-        ComfyUIBackendExtension.NodeToFeatureMap[TileProgressModelNode.ClassType] = TileProgressModelNode.ClassType;
     }
 
     public override void OnInit()
     {
         ComfyTyped.Generated.NodeRegistrations.EnsureRegistered();
-        NodeRegistry.RegisterAssembly(typeof(TileSplitNode).Assembly);
+        TileNodeRegistrations.EnsureRegistered();
         ComfyUISelfStartBackend.CustomNodePaths.Add(Path.GetFullPath(Path.Join(FilePath, "comfy_node")));
         RegisterParameters();
         T2IEngine.PostGenerateEvent += OutputFormatGuard.HandleOutput;
@@ -34,8 +29,7 @@ public sealed class SeedVRTilingExtension : Extension
 
     internal static void RegisterParameters()
     {
-        T2IParamGroup group = ComfyUIBackendExtension.GroupSeedVR
-            ?? throw new InvalidOperationException("SeedVR Tiling requires SwarmUI with native SeedVR support.");
+        T2IParamGroup group = ComfyUIBackendExtension.GroupSeedVR;
         Enabled = T2IParamTypes.Register<bool>(new("SeedVR Image Tiling",
             "If enabled, restores the image through SeedVR in smaller, overlapping tiles.\n"
             + "Tiling reduces VRAM use, but takes longer and may affect quality. For still images only.",
@@ -44,12 +38,12 @@ public sealed class SeedVRTilingExtension : Extension
         TileSize = T2IParamTypes.Register<int>(new("SeedVR Image Tile Size",
             "Restores the image through SeedVR using tiles of this size, measured in pixels after upscaling.\n"
             + "Smaller tiles use less VRAM, but take longer and may affect quality. Larger tiles give SeedVR more image context, but need more VRAM.",
-            "512", Min: 64, Max: 8192, ViewMax: 2048, Step: 8, Group: group, FeatureFlag: "comfyui",
+            "512", Min: 64, Max: int.MaxValue, ViewMax: 2048, Step: 8, Group: group, FeatureFlag: "comfyui",
             DependNonDefault: depends, OrderPriority: 5, DoNotPreview: true));
         TileOverlap = T2IParamTypes.Register<int>(new("SeedVR Image Tile Overlap",
             "Controls how much neighboring tiles overlap, in pixels.\n"
             + "Higher overlap can improve quality at tile edges, but uses more VRAM and takes longer. Must be smaller than Tile Size.",
-            "32", Min: 0, Max: 8192, ViewMax: 256, Step: 8, Group: group, FeatureFlag: "comfyui",
+            "32", Min: 0, Max: int.MaxValue, ViewMax: 256, Step: 8, Group: group, FeatureFlag: "comfyui",
             DependNonDefault: depends, OrderPriority: 6, DoNotPreview: true));
         AntiAliasing = T2IParamTypes.Register<double>(new("SeedVR Image Anti-Aliasing Strength",
             "Adds smoothing after the tiles are joined.\n"
@@ -66,11 +60,12 @@ public sealed class SeedVRTilingExtension : Extension
             Group: group, FeatureFlag: "comfyui", IsAdvanced: true,
             DependNonDefault: depends, OrderPriority: 7, DoNotPreview: true));
         MegaDimensionsFallback = T2IParamTypes.Register<string>(new("Fallback on mega-dimensions",
-            "WebP allows up to 16,383 pixels per side. Fallback applies only if the width or height exceeds that limit, regardless of total pixel count.\n"
-            + "Off: stop with an error asking you to reduce the image size.\n"
-            + "JPG: keep the full size, with usually smaller files and some compression loss. Uses your image quality setting; transparency is lost.\n"
-            + "PNG: keep the full size and transparency, with lossless compression. Files can be much larger.",
-            "Off", GetValues: _ => ["Off", "JPG", "PNG"], Group: group, FeatureFlag: "comfyui",
+            "Choose the output format when an image exceeds WebP's 16,383-pixel side limit.\n"
+            + "PNG preserves detail and transparency. JPG produces smaller files with compression loss and no transparency.\n"
+            + "Images exceeding JPG's 65,535-pixel side limit always use PNG.",
+            OutputFormatGuard.DefaultFallback, GetValues: _ => ["PNG", "JPG"], ValidateValues: false,
+            Clean: (_, value) => string.Equals(value, "JPG", StringComparison.OrdinalIgnoreCase) ? "JPG" : OutputFormatGuard.DefaultFallback,
+            Group: group, FeatureFlag: "comfyui",
             DependNonDefault: depends, OrderPriority: 9, DoNotPreview: true));
     }
 
@@ -81,24 +76,12 @@ public sealed class SeedVRTilingExtension : Extension
 
     public override void OnPreLaunch()
     {
-        if (hookInstalled)
-        {
-            return;
-        }
-        // Initialize WorkflowGenerator before reading SeedVRStep. Its static constructor
-        // registers core steps. Wrap both references: SeedVR Only invokes the delegate
-        // directly and exits before ordinary extension steps can run.
+        // Reading Steps initializes core registration before we capture SeedVRStep.
         List<WorkflowGenerator.WorkflowGenStep> steps = WorkflowGenerator.Steps;
-        Action<WorkflowGenerator> original = WorkflowGeneratorSteps.SeedVRStep
-            ?? throw new InvalidOperationException("Native SwarmUI SeedVR step is unavailable.");
+        Action<WorkflowGenerator> original = WorkflowGeneratorSteps.SeedVRStep;
         int index = steps.FindIndex(step => step.Action == original);
-        if (index < 0)
-        {
-            throw new InvalidOperationException("Cannot locate the native SeedVR workflow step.");
-        }
         Action<WorkflowGenerator> wrapped = g => TileWorkflow.Run(g, original);
         WorkflowGeneratorSteps.SeedVRStep = wrapped;
         steps[index] = new(wrapped, steps[index].Priority);
-        hookInstalled = true;
     }
 }

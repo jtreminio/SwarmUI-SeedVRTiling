@@ -1,0 +1,10 @@
+[tool.mypy]
+python_version = "3.10"
+disallow_untyped_defs = true
+check_untyped_defs = true
+follow_imports = "silent"
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"

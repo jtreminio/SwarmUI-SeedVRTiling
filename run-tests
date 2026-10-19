@@ -7,5 +7,14 @@ if [[ -n "${SWARM_ASSEMBLY:-}" ]]; then
     test_args+=("-p:SwarmAssemblyPath=$SWARM_ASSEMBLY")
 fi
 dotnet test Tests/SwarmUI-SeedVRTiling.Tests.csproj --nologo "${test_args[@]}"
-PYTHONPATH="$COMFYUI_ROOT${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON_BIN:-python3}" -m unittest discover -s tests -v
-"${NODE_BIN:-node}" --test tests/test_visibility.cjs
+PYTHONPATH="$COMFYUI_ROOT${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON_BIN:-python3}" - <<'PYTHON'
+import os
+import unittest
+import comfy.cli_args
+
+if os.environ.get("SEEDVR_TEST_CPU") == "1":
+    comfy.cli_args.args.cpu = True
+suite = unittest.defaultTestLoader.discover("comfy_node/tests")
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+raise SystemExit(not result.wasSuccessful())
+PYTHON

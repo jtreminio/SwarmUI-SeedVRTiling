@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 .cache/
 TestResults/
+benchmarks/
+.mypy_cache/
+.ruff_cache/
