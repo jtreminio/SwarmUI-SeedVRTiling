@@ -34,6 +34,9 @@ internal static class TileWorkflow
         {
             return;
         }
+        // Core SeedVR allocates sequential IDs. Other extensions can reserve higher IDs
+        // without advancing LastID (for example, an audio save node).
+        BridgeSync.SyncLastId(generator);
         Pending.Add(generator, generator.Workflow.Properties().Select(property => property.Name).ToHashSet());
     }
 

@@ -127,6 +127,52 @@ public class WorkflowTests
         Assert.Single(generator.Workflow.Properties(), property => property.Value["class_type"]?.Value<string>() == SwarmSeedVRTileSplitNode.ClassType);
     }
 
+    [Theory]
+    [InlineData(65162)]
+    [InlineData(70000)]
+    public void NativeRestorePreservesReservedAudioOutputIds(int nextId)
+    {
+        WorkflowGenerator generator = Generator();
+        generator.CreateNode("SaveAudio", new JObject
+        {
+            ["audio"] = new JArray("65160", 0),
+            ["filename_prefix"] = "audio"
+        }, "65170");
+        generator.LastID = nextId;
+        JObject audioOutput = (JObject)generator.Workflow["65170"].DeepClone();
+
+        // Core allocates sequential IDs without checking explicitly reserved IDs.
+        // With LastID 65162, the ninth node (postprocessing) overwrites 65170.
+        WorkflowGenerator template = Generator();
+        NativeGraph(template);
+        Dictionary<string, string> ids = [];
+        RunStage(generator, g =>
+        {
+            foreach (JProperty property in template.Workflow.Properties())
+            {
+                JObject inputs = (JObject)property.Value["inputs"].DeepClone();
+                foreach (JProperty input in inputs.Properties())
+                {
+                    if (input.Value is JArray connection)
+                    {
+                        connection[0] = ids[connection[0].Value<string>()];
+                    }
+                }
+                ids[property.Name] = g.CreateNode(property.Value["class_type"].Value<string>(), inputs);
+            }
+        });
+
+        Assert.True(JToken.DeepEquals(audioOutput, generator.Workflow["65170"]));
+        Assert.True(int.Parse(ids["1"]) >= Math.Max(nextId, 65171));
+        JProperty split = FindNode(generator, SwarmSeedVRTileSplitNode.ClassType);
+        JProperty merge = FindNode(generator, SwarmSeedVRTileMergeNode.ClassType);
+        Assert.Equal(new JArray(split.Name, 0), generator.Workflow[ids["2"]]["inputs"]["resized_images"]);
+        Assert.Equal(new JArray(ids["8"], 0), merge.Value["inputs"]["images"]);
+        Assert.Equal(new JArray(merge.Name, 0), generator.Workflow[ids["9"]]["inputs"]["images"]);
+        Assert.Equal(new JArray(ids["9"], 0), generator.Workflow[ids["10"]]["inputs"]["images"]);
+        Assert.Equal(13, generator.Workflow.Count);
+    }
+
     [Fact]
     public void TemporalSplittingDoesNotCollapseSpatialTileList()
     {
