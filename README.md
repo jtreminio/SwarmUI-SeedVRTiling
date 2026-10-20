@@ -71,7 +71,9 @@ SEEDVR_TEST_CPU=1 \
 ./run-tests
 ```
 
-The runner checks C# workflows and image encoding in `Tests/`, and Python nodes and blending in `comfy_node/tests/`. `SEEDVR_TEST_CPU=1` allows CPU-only checks; CUDA-specific tests skip when CUDA is unavailable. Optional `SWARM_ASSEMBLY` selects a compiled SwarmUI assembly for the C# tests.
+The runner checks C# workflows and image encoding in `Tests/`, and Python nodes and blending in `comfy_node/SwarmSeedVRTilingNodes/tests/`. `SEEDVR_TEST_CPU=1` allows CPU-only checks; CUDA-specific tests skip when CUDA is unavailable. Optional `SWARM_ASSEMBLY` selects a compiled SwarmUI assembly for the C# tests.
+
+ComfyUI scans immediate subdirectories of `comfy_node/` as node packages. Keep tests inside `SwarmSeedVRTilingNodes/` and tool caches outside `comfy_node/` to avoid failed imports.
 
 These checks do not run SeedVR model inference. After recompiling and restarting SwarmUI, verify that tiling controls appear inside **SeedVR**, leaving the tiling checkbox off preserves ordinary SeedVR behavior, and checking it restores a still image.
 

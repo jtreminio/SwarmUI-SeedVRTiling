@@ -7,7 +7,7 @@ from pathlib import Path
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from comfy_api.internal import make_locked_method_func
 from comfy_extras.nodes_seedvr import SeedVR2PostProcessing, SeedVR2Preprocess
 

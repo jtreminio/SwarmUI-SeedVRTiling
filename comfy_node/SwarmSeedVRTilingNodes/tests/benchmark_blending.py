@@ -25,7 +25,7 @@ parser.add_argument("--method", choices=["multiband", "simple"], default="multib
 parser.add_argument("--pattern", choices=["constant", "noise"], default="constant")
 parser.add_argument("--report", type=Path, help="Write benchmark measurements as JSON")
 args = parser.parse_args()
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import comfy.cli_args
 
 if args.device == "cpu":

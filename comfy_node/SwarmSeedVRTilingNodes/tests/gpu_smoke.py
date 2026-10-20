@@ -1,6 +1,6 @@
 """Opt-in smoke test with real native models. Run with ComfyUI on PYTHONPATH.
 
-python comfy_node/tests/gpu_smoke.py --models /path/to/Models --output /tmp/seedvr-smoke.png
+python comfy_node/SwarmSeedVRTilingNodes/tests/gpu_smoke.py --models /path/to/Models --output /tmp/seedvr-smoke.png
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ parser.add_argument("--width", type=int, default=384)
 parser.add_argument("--height", type=int, default=256)
 parser.add_argument("--method", choices=["multiband", "simple", "all"], default="multiband")
 options = parser.parse_args()
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import folder_paths
 import nodes

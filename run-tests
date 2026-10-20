@@ -14,7 +14,7 @@ import comfy.cli_args
 
 if os.environ.get("SEEDVR_TEST_CPU") == "1":
     comfy.cli_args.args.cpu = True
-suite = unittest.defaultTestLoader.discover("comfy_node/tests")
+suite = unittest.defaultTestLoader.discover("comfy_node/SwarmSeedVRTilingNodes/tests")
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 raise SystemExit(not result.wasSuccessful())
 PYTHON

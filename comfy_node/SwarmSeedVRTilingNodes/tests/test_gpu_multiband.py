@@ -10,7 +10,7 @@ import torch
 from comfy.utils import ProgressBar
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from SwarmSeedVRTilingNodes import blending as multiband
 from SwarmSeedVRTilingNodes import tiling
 
