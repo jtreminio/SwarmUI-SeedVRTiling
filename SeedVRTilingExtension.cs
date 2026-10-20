@@ -6,24 +6,44 @@ using SwarmUI.Text2Image;
 
 namespace SeedVRTiling;
 
+/// <summary>Adds opt-in spatial tiling to Swarm's native SeedVR restoration stage.</summary>
 public sealed class SeedVRTilingExtension : Extension
 {
-    public static T2IRegisteredParam<bool> Enabled;
-    public static T2IRegisteredParam<int> TileSize, TileOverlap;
-    public static T2IRegisteredParam<double> AntiAliasing;
-    public static T2IRegisteredParam<string> Blending, MegaDimensionsFallback;
+    /// <summary>Backend capability discovered from the tile split node.</summary>
+    internal const string SplitFeature = "seedvr_tiling_split";
 
-    public override void OnPreInit()
-    {
-        ScriptFiles.Add("Assets/seedvr-tiling.js");
-    }
+    /// <summary>Backend capability discovered from the tile merge node.</summary>
+    internal const string MergeFeature = "seedvr_tiling_merge";
+
+    /// <summary>Enables tiling while preserving the existing preset and API parameter ID.</summary>
+    public static T2IRegisteredParam<bool> Enabled;
+
+    /// <summary>Tile side length in pixels after upscaling.</summary>
+    public static T2IRegisteredParam<int> TileSize;
+
+    /// <summary>Overlap between neighboring tiles in pixels.</summary>
+    public static T2IRegisteredParam<int> TileOverlap;
+
+    /// <summary>Optional smoothing strength after joining tiles.</summary>
+    public static T2IRegisteredParam<double> AntiAliasing;
+
+    /// <summary>Method used to blend overlapping tiles.</summary>
+    public static T2IRegisteredParam<string> Blending;
+
+    /// <summary>Output format used when the requested format cannot encode the image.</summary>
+    public static T2IRegisteredParam<string> MegaDimensionsFallback;
 
     public override void OnInit()
     {
+        ScriptFiles.Add("Assets/seedvr-tiling.js");
         ComfyTyped.Generated.NodeRegistrations.EnsureRegistered();
         TileNodeRegistrations.EnsureRegistered();
         ComfyUISelfStartBackend.CustomNodePaths.Add(Path.GetFullPath(Path.Join(FilePath, "comfy_node")));
+        ComfyUIBackendExtension.NodeToFeatureMap[SwarmSeedVRTileSplitNode.ClassType] = SplitFeature;
+        ComfyUIBackendExtension.NodeToFeatureMap[SwarmSeedVRTileMergeNode.ClassType] = MergeFeature;
         RegisterParameters();
+        WorkflowGenerator.AddStep(TileWorkflow.BeforeSeedVR, TileWorkflow.BeforeSeedVRPriority);
+        WorkflowGenerator.AddStep(TileWorkflow.AfterSeedVR, TileWorkflow.AfterSeedVRPriority);
         T2IEngine.PostGenerateEvent += OutputFormatGuard.HandleOutput;
     }
 
@@ -63,7 +83,7 @@ public sealed class SeedVRTilingExtension : Extension
             "Choose the output format when an image exceeds WebP's 16,383-pixel side limit.\n"
             + "PNG preserves detail and transparency. JPG produces smaller files with compression loss and no transparency.\n"
             + "Images exceeding JPG's 65,535-pixel side limit always use PNG.",
-            OutputFormatGuard.DefaultFallback, GetValues: _ => ["PNG", "JPG"], ValidateValues: false,
+            OutputFormatGuard.DefaultFallback, GetValues: _ => ["PNG", "JPG"],
             Clean: (_, value) => string.Equals(value, "JPG", StringComparison.OrdinalIgnoreCase) ? "JPG" : OutputFormatGuard.DefaultFallback,
             Group: group, FeatureFlag: "comfyui",
             DependNonDefault: depends, OrderPriority: 9, DoNotPreview: true));
@@ -74,14 +94,4 @@ public sealed class SeedVRTilingExtension : Extension
         T2IEngine.PostGenerateEvent -= OutputFormatGuard.HandleOutput;
     }
 
-    public override void OnPreLaunch()
-    {
-        // Reading Steps initializes core registration before we capture SeedVRStep.
-        List<WorkflowGenerator.WorkflowGenStep> steps = WorkflowGenerator.Steps;
-        Action<WorkflowGenerator> original = WorkflowGeneratorSteps.SeedVRStep;
-        int index = steps.FindIndex(step => step.Action == original);
-        Action<WorkflowGenerator> wrapped = g => TileWorkflow.Run(g, original);
-        WorkflowGeneratorSteps.SeedVRStep = wrapped;
-        steps[index] = new(wrapped, steps[index].Priority);
-    }
 }

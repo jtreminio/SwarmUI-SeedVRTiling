@@ -4,6 +4,7 @@ using ComfyTyped.Generated;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Builtin_ComfyUIBackend;
 using SwarmUI.Text2Image;
+using SwarmUI.Utils;
 using Xunit;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
@@ -19,6 +20,8 @@ public class WorkflowTests
         ComfyUIBackendExtension.GroupSeedVR = new("SeedVR", Toggles: true);
         ComfyUIBackendExtension.SeedVRModel = T2IParamTypes.Register<T2IModel>(new("SeedVR Model", "", "None"));
         ComfyUIBackendExtension.SeedVRSplitLatent = T2IParamTypes.Register<bool>(new("SeedVR Split Latent", "", "false"));
+        T2IParamTypes.JustLoadModel = T2IParamTypes.Register<bool>(new("Just Load Model", "", "false"));
+        T2IParamTypes.BatchSize = T2IParamTypes.Register<int>(new("Batch Size", "", "1", Min: 1, Max: 100, Step: 1));
         T2IParamTypes.ImageFormat = T2IParamTypes.Register<string>(new("Image Format", "", "PNG"));
         SeedVRTilingExtension.RegisterParameters();
     }
@@ -32,9 +35,18 @@ public class WorkflowTests
             Workflow = new JObject(),
             UserInput = new T2IParamInput(null)
         };
+        generator.CurrentMedia = new WGNodeData(new JArray("source", 0), generator, WGNodeData.DT_IMAGE, null);
+        generator.Features.UnionWith([SeedVRTilingExtension.SplitFeature, SeedVRTilingExtension.MergeFeature]);
         generator.UserInput.Set(SeedVRTilingExtension.Enabled, true);
         generator.UserInput.Set(ComfyUIBackendExtension.SeedVRModel, new T2IModel(null, "", "seedvr.safetensors", "seedvr"));
         return generator;
+    }
+
+    private static void RunStage(WorkflowGenerator generator, Action<WorkflowGenerator> nativeStep)
+    {
+        TileWorkflow.BeforeSeedVR(generator);
+        nativeStep(generator);
+        TileWorkflow.AfterSeedVR(generator);
     }
 
     private static void NativeGraph(WorkflowGenerator generator)
@@ -63,7 +75,7 @@ public class WorkflowTests
     {
         WorkflowGenerator generator = Generator();
         generator.UserInput.Set(T2IParamTypes.ImageFormat, "WEBP");
-        TileWorkflow.Run(generator, NativeGraph);
+        RunStage(generator, NativeGraph);
         JProperty split = FindNode(generator, SwarmSeedVRTileSplitNode.ClassType);
         JProperty merge = FindNode(generator, SwarmSeedVRTileMergeNode.ClassType);
         Assert.Equal(new JArray(split.Name, 0), generator.Workflow["2"]["inputs"]["resized_images"]);
@@ -107,7 +119,7 @@ public class WorkflowTests
             generator.Workflow["earlier_" + property.Name] = node;
         }
         JObject before = (JObject)generator.Workflow.DeepClone();
-        TileWorkflow.Run(generator, NativeGraph);
+        RunStage(generator, NativeGraph);
         foreach (JProperty property in before.Properties())
         {
             Assert.True(JToken.DeepEquals(property.Value, generator.Workflow[property.Name]));
@@ -120,7 +132,7 @@ public class WorkflowTests
     {
         WorkflowGenerator generator = Generator();
         generator.UserInput.Set(ComfyUIBackendExtension.SeedVRSplitLatent, true);
-        TileWorkflow.Run(generator, g =>
+        RunStage(generator, g =>
         {
             NativeGraph(g);
             using WorkflowBridge bridge = WorkflowBridge.Create(g.Workflow);
@@ -142,4 +154,181 @@ public class WorkflowTests
         Assert.Equal(new JArray("7", 0), generator.Workflow["8"]["inputs"]["samples"]);
         Assert.True(generator.UserInput.Get(ComfyUIBackendExtension.SeedVRSplitLatent));
     }
+
+    [Theory]
+    [InlineData("IMAGE")]
+    [InlineData("LATENT_IMAGE")]
+    public void HooksRunAroundNativeRestoreBeforeFinalSave(string dataType)
+    {
+        WorkflowGenerator generator = Generator();
+        generator.CurrentMedia.DataType = dataType;
+        List<WorkflowGenerator.WorkflowGenStep> steps =
+        [
+            new(TileWorkflow.AfterSeedVR, TileWorkflow.AfterSeedVRPriority),
+            new(g =>
+            {
+                Assert.NotNull(FindNode(g, SwarmSeedVRTileMergeNode.ClassType));
+            }, 100),
+            new(NativeGraph, 40),
+            new(TileWorkflow.BeforeSeedVR, TileWorkflow.BeforeSeedVRPriority)
+        ];
+        foreach (WorkflowGenerator.WorkflowGenStep step in steps.OrderBy(step => step.Priority))
+        {
+            step.Action(generator);
+        }
+        Assert.Equal(12, generator.Workflow.Count);
+    }
+
+    [Fact]
+    public void MissingSeedVrModelLeavesNativeGraphUnchanged()
+    {
+        WorkflowGenerator generator = Generator();
+        generator.Features.Clear();
+        generator.UserInput.Remove(ComfyUIBackendExtension.SeedVRModel);
+        NativeGraph(generator);
+        JObject existing = (JObject)generator.Workflow.DeepClone();
+        RunStage(generator, WorkflowGenerator.Steps.Single(step => step.Priority == 40).Action);
+        Assert.True(JToken.DeepEquals(existing, generator.Workflow));
+        Assert.False(generator.UserInput.ExtraMeta.ContainsKey(OutputFormatGuard.ContextKey));
+    }
+
+    [Theory]
+    [InlineData("disabled")]
+    [InlineData("absent")]
+    [InlineData("load-model")]
+    [InlineData("batch")]
+    [InlineData("frames")]
+    [InlineData("VIDEO")]
+    [InlineData("LATENT_VIDEO")]
+    [InlineData("AUDIO")]
+    [InlineData("LATENT_AUDIO")]
+    [InlineData("no-media")]
+    public void IneligibleRequestsKeepNativeGraphUnchanged(string scenario)
+    {
+        WorkflowGenerator generator = Generator();
+        switch (scenario)
+        {
+            case "disabled":
+                generator.UserInput.Set(SeedVRTilingExtension.Enabled, false);
+                break;
+            case "absent":
+                generator.UserInput.Remove(SeedVRTilingExtension.Enabled);
+                break;
+            case "load-model":
+                generator.UserInput.Set(T2IParamTypes.JustLoadModel, true);
+                break;
+            case "batch":
+                generator.UserInput.Set(T2IParamTypes.BatchSize, 2);
+                break;
+            case "frames":
+                generator.CurrentMedia.Frames = 2;
+                break;
+            case "no-media":
+                generator.CurrentMedia = null;
+                break;
+            default:
+                generator.CurrentMedia.DataType = scenario;
+                break;
+        }
+        // Ineligible requests must not require extension nodes on the backend.
+        generator.Features.Clear();
+        JObject original = null;
+        RunStage(generator, g =>
+        {
+            NativeGraph(g);
+            original = (JObject)g.Workflow.DeepClone();
+        });
+        Assert.True(JToken.DeepEquals(original, generator.Workflow));
+        Assert.False(generator.UserInput.ExtraMeta.ContainsKey(OutputFormatGuard.ContextKey));
+    }
+
+    [Fact]
+    public void RestrictedCustomNodesLeaveNativeGraphUnchanged()
+    {
+        bool previous = WorkflowGenerator.RestrictCustomNodes;
+        try
+        {
+            WorkflowGenerator.RestrictCustomNodes = true;
+            WorkflowGenerator generator = Generator();
+            generator.Features.Clear();
+            RunStage(generator, NativeGraph);
+            Assert.Equal(10, generator.Workflow.Count);
+            Assert.False(generator.UserInput.ExtraMeta.ContainsKey(OutputFormatGuard.ContextKey));
+        }
+        finally
+        {
+            WorkflowGenerator.RestrictCustomNodes = previous;
+        }
+    }
+
+    [Theory]
+    [InlineData(SeedVRTilingExtension.SplitFeature)]
+    [InlineData(SeedVRTilingExtension.MergeFeature)]
+    public void MissingBackendNodeFailsBeforeTilingChanges(string feature)
+    {
+        WorkflowGenerator generator = Generator();
+        generator.Features.Remove(feature);
+        JObject original = null;
+        SwarmUserErrorException error = Assert.Throws<SwarmUserErrorException>(() =>
+            RunStage(generator, g =>
+            {
+                NativeGraph(g);
+                original = (JObject)g.Workflow.DeepClone();
+            }));
+        Assert.Contains("selected ComfyUI backend", error.Message);
+        Assert.True(JToken.DeepEquals(original, generator.Workflow));
+    }
+
+    [Fact]
+    public void InvalidOverlapFailsBeforeTilingChanges()
+    {
+        WorkflowGenerator generator = Generator();
+        generator.UserInput.Set(SeedVRTilingExtension.TileOverlap, 512);
+        JObject original = null;
+        Assert.Throws<SwarmUserErrorException>(() => RunStage(generator, g =>
+        {
+            NativeGraph(g);
+            original = (JObject)g.Workflow.DeepClone();
+        }));
+        Assert.True(JToken.DeepEquals(original, generator.Workflow));
+    }
+
+    [Fact]
+    public void InterleavedGeneratorsKeepTheirOwnTileSettings()
+    {
+        WorkflowGenerator first = Generator();
+        WorkflowGenerator second = Generator();
+        first.UserInput.Set(SeedVRTilingExtension.TileSize, 1024);
+        second.UserInput.Set(SeedVRTilingExtension.TileSize, 256);
+        TileWorkflow.BeforeSeedVR(first);
+        TileWorkflow.BeforeSeedVR(second);
+        NativeGraph(second);
+        TileWorkflow.AfterSeedVR(second);
+        NativeGraph(first);
+        TileWorkflow.AfterSeedVR(first);
+        Assert.Equal(1024, (int)FindNode(first, SwarmSeedVRTileSplitNode.ClassType).Value["inputs"]["tile_size"]);
+        Assert.Equal(256, (int)FindNode(second, SwarmSeedVRTileSplitNode.ClassType).Value["inputs"]["tile_size"]);
+        JObject completed = (JObject)first.Workflow.DeepClone();
+        TileWorkflow.AfterSeedVR(first);
+        Assert.True(JToken.DeepEquals(completed, first.Workflow));
+    }
+
+    [Fact]
+    public void NoNewNativeRestorationLeavesEarlierStagesUntouchedAndClearsPendingState()
+    {
+        WorkflowGenerator generator = Generator();
+        generator.Features.Clear();
+        generator.UserInput.Set(SeedVRTilingExtension.TileOverlap, 512);
+        NativeGraph(generator);
+        JObject before = (JObject)generator.Workflow.DeepClone();
+        TileWorkflow.BeforeSeedVR(generator);
+        TileWorkflow.AfterSeedVR(generator);
+        Assert.True(JToken.DeepEquals(before, generator.Workflow));
+        Assert.False(generator.UserInput.ExtraMeta.ContainsKey(OutputFormatGuard.ContextKey));
+        generator.Workflow.RemoveAll();
+        NativeGraph(generator);
+        TileWorkflow.AfterSeedVR(generator);
+        Assert.Equal(10, generator.Workflow.Count);
+    }
+
 }

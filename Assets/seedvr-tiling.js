@@ -1,20 +1,7 @@
-/** Keep declared visibility across Swarm's parameter rebuilds. */
-let seedVRTilingVisibility = new WeakMap();
-
+/** Match the checkbox value type so core's DependNonDefault comparison works. */
 postParamBuildSteps.push(() => {
-    let input = getRequiredElementById('input_seedvrimagetiling');
-    let children = gen_param_types.filter(param => param.depend_non_default == 'seedvrimagetiling');
-    for (let param of children) {
-        if (!seedVRTilingVisibility.has(param)) {
-            seedVRTilingVisibility.set(param, param.visible);
-        }
+    let param = gen_param_types.find(param => param.id == 'seedvrimagetiling');
+    if (param) {
+        param.default = `${param.default}` == 'true';
     }
-    let update = () => {
-        for (let param of children) {
-            param.visible = seedVRTilingVisibility.get(param) && input.checked;
-        }
-        hideUnsupportableParams();
-    };
-    input.addEventListener('change', update);
-    update();
 });

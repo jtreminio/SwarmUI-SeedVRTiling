@@ -9,19 +9,30 @@ namespace SeedVRTiling;
 /// <summary>Selects an encodable image format before metadata conversion and saving.</summary>
 internal static class OutputFormatGuard
 {
+    /// <summary>Maximum side length accepted by WebP.</summary>
     internal const int WebpMaxDimension = 16383;
+
+    /// <summary>Private request context copied into each output's metadata input.</summary>
     internal const string ContextKey = "seedvr_output_format_context";
 
     // Preserve the request through per-output clones without serializing its reference.
     [JsonObject(MemberSerialization.OptIn)]
     private sealed class RequestContext(T2IParamInput request, string format, string fallback)
     {
+        /// <summary>Original input used by Swarm to select the saved filename extension.</summary>
         internal readonly T2IParamInput Request = request;
+
+        /// <summary>Requested format before any output-specific fallback.</summary>
         internal readonly string Format = format;
+
+        /// <summary>Format selected for outputs exceeding WebP's dimensions.</summary>
         internal readonly string Fallback = fallback;
     }
 
+    /// <summary>Maximum side length accepted by JPEG.</summary>
     internal const int JpgMaxDimension = 65535;
+
+    /// <summary>Lossless fallback without WebP's or JPEG's side-length limit.</summary>
     internal const string DefaultFallback = "PNG";
 
     internal static string SelectFormat(string format, string fallback, int width, int height)

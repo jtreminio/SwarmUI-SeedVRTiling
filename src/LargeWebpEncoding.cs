@@ -15,6 +15,7 @@ internal static class LargeWebpEncoding
 {
     private sealed class ConfiguredClone(Configuration configuration) : IImageVisitor
     {
+        /// <summary>Clone retaining the pixel type with an image-specific configuration.</summary>
         internal SixLabors.ImageSharp.Image Result;
 
         public void Visit<TPixel>(Image<TPixel> image) where TPixel : unmanaged, IPixel<TPixel>
@@ -59,6 +60,8 @@ internal static class LargeWebpEncoding
                 cached.AcceptVisitor(clone);
                 configured = clone.Result;
             }
+            // Swarm exposes no configuration setter; its public cache is the
+            // integration point used before asynchronous metadata encoding starts.
             file._CacheISImg = configured;
             cached?.Dispose();
         }
@@ -73,6 +76,7 @@ internal static class LargeWebpEncoding
 /// </summary>
 internal sealed class LargeWebpAllocator(MemoryAllocator pooled, long pooledLimitBytes = LargeWebpAllocator.DefaultBufferLimit) : MemoryAllocator
 {
+    /// <summary>ImageSharp 3.1.x's default limit for a contiguous allocation.</summary>
     internal const long DefaultBufferLimit = 1L << 30;
 
     // Keep image storage in ordinary pooled chunks. Only large contiguous
@@ -91,6 +95,7 @@ internal sealed class LargeWebpAllocator(MemoryAllocator pooled, long pooledLimi
 
     private sealed class LargeBuffer<T> : IMemoryOwner<T> where T : struct
     {
+        /// <summary>Contiguous storage released when the encoder disposes its buffer.</summary>
         private T[] data;
 
         internal LargeBuffer(int length, AllocationOptions options)
